@@ -1,0 +1,28 @@
+[tool.poetry]
+name = "emergent-abstractions"
+version = "0.1.0"
+description = "Emergent abstractions"
+authors = ["rvverdug"]
+packages = []
+
+[tool.poetry.dependencies]
+python = "^3.11"
+torch = "^2.2.2"
+torchvision = "^0.17.2"
+scipy = "^1.12.0"
+numpy = "^1.26.4"
+pytest = "^8.1.1"
+editdistance = "^0.8.1"
+rich = "^13.7.1"
+scikit-learn = "^1.4.1.post1"
+wandb = "^0.16.5"
+submitit = "^1.5.1"
+matplotlib = "^3.8.3"
+pandas = "^2.2.1"
+tqdm = "^4.66.2"
+egg = {git = "https://github.com/kaulson/EGG.git", branch="bugfix/concurrent-wrapper-missing-output"}
+notebook = "^7.1.2"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
