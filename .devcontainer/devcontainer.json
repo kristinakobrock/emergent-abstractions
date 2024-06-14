@@ -1,0 +1,52 @@
+{
+  "name": "Python 3",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "shutdownAction": "stopContainer",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-azuretools.vscode-docker",
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-python.vscode-pylance-extension-pack",
+        "ms-python.python-auto-venv",
+        "ms-python.vscode-pylance-pack",
+        "ms-python.black-formatter",
+        "ms-python.isort",
+        "ms-python.flake8",
+        "ms-python.mypy-type-checker",
+        "ms-python.pylint",
+        "davidanson.vscode-markdownlint",
+        "ms-toolsai.jupyter"
+      ],
+      "settings": {
+        "python.formatting.provider": "black",
+        "python.formatting.blackArgs": [
+          "--line-length",
+          "88"
+        ],
+        "isort.args": [
+          "--profile",
+          "black"
+        ],
+        "mypy-type-checker.args": [
+          "--no-warn-no-return"
+        ],
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "ms-python.black-formatter",
+        "[jsonc]": {
+          "editor.defaultFormatter": "vscode.json-language-features"
+        },
+        "flake8.enabled": true,
+        "mypy.enabled": true,
+        "pylint.enabled": true,
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "markdownlint.enable": true,
+        "markdownlint.run": "onSave"
+      }
+    }
+  }
+}
