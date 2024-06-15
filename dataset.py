@@ -14,7 +14,7 @@ class DataSet(torch.utils.data.Dataset):
 	This class provides the torch.Dataloader-loadable dataset.
 	"""
 	def __init__(self, properties_dim=[3,3,3], game_size=10, device='cuda', testing=False, zero_shot=False,
-				 zero_shot_test=None, sample_context = False):
+				 zero_shot_test=None, sample_context = False, encoding_method_name='one_hot'):
 		"""
 		properties_dim: vector that defines how many attributes and features per attributes the dataset should contain, defaults to a 3x3x3 dataset
 		game_size: integer that defines how many targets and distractors a game consists of
@@ -26,6 +26,11 @@ class DataSet(torch.utils.data.Dataset):
 		self.device = device
 		self.sample_context = sample_context
 		
+		# creates option for selecting between encoding function one hot or vague float encoding
+		# this ensures the chosen encoding method is used throughout the dataset
+		# the default method is one-hot
+		self.encoding_method = self.get_encoding_function(encoding_method_name)
+
 		# get all concepts
 		self.concepts = self.get_all_concepts()
 		# get all objects
@@ -44,7 +49,14 @@ class DataSet(torch.utils.data.Dataset):
 	def __getitem__(self, idx):
 		"""Returns the i-th sample (and label?) given an index (idx)."""
 		return self.dataset[idx]
-
+	
+	def get_encoding_function(self, encoding_method: str):
+		"""Returns the desired encoding function based on the inserted string.
+		For one-hot encoding input one_hot. For the float range encoding input 
+		anything else, for example vague or floats"""
+		if encoding_method == 'one_hot':
+			return self._many_hot_encoding 
+		return self._float_range_encoding
 
 	def get_datasets(self, split_ratio, include_concept=False):
 		"""
@@ -69,11 +81,11 @@ class DataSet(torch.utils.data.Dataset):
 				nr_possible_contexts = sum(self.concepts[concept_idx][1])
 				if not self.sample_context:
 					for context_condition in range(nr_possible_contexts):
-						train_and_val.append(self.get_item(concept_idx, context_condition, self._many_hot_encoding, include_concept))
+						train_and_val.append(self.get_item(concept_idx, context_condition, self.encoding_method, include_concept))
 				# or sample context condition from possible context conditions
 				else:
 					context_condition = random.choice(range(nr_possible_contexts))
-					train_and_val.append(self.get_item(concept_idx, context_condition, self._many_hot_encoding, include_concept))
+					train_and_val.append(self.get_item(concept_idx, context_condition, self.encoding_method, include_concept))
 		
 		# Calculating how many train
 		train_samples = int(len(train_and_val)*(train_ratio/(train_ratio+val_ratio)))
@@ -89,11 +101,11 @@ class DataSet(torch.utils.data.Dataset):
 				nr_possible_contexts = sum(self.concepts[concept_idx][1])
 				if not self.sample_context:
 					for context_condition in range(nr_possible_contexts):
-						test.append(self.get_item(concept_idx, context_condition, self._many_hot_encoding, include_concept))
+						test.append(self.get_item(concept_idx, context_condition, self.encoding_method, include_concept))
 				# or sample context condition from possible context conditions
 				else:
 					context_condition = random.choice(range(nr_possible_contexts))
-					test.append(self.get_item(concept_idx, context_condition, self._many_hot_encoding, include_concept))
+					test.append(self.get_item(concept_idx, context_condition, self.encoding_method, include_concept))
 
 		return train, val, test
 	
@@ -128,21 +140,21 @@ class DataSet(torch.utils.data.Dataset):
 				nr_possible_contexts = sum(self.concepts[concept_idx][1])
                 #print("nr poss cont", nr_possible_contexts)
 				for context_condition in range(nr_possible_contexts):
-                	# 1) 'generic'
+					# 1) 'generic'
 					if test_cond == 'generic':
                         # test dataset only contains most generic concepts
 						if nr_possible_contexts == 1:
-							test.append(self.get_item(concept_idx, context_condition, self._many_hot_encoding, include_concept))
+							test.append(self.get_item(concept_idx, context_condition, self.encoding_method, include_concept))
 						else:
-							train_and_val.append(self.get_item(concept_idx, context_condition, self._many_hot_encoding, include_concept))
+							train_and_val.append(self.get_item(concept_idx, context_condition, self.encoding_method, include_concept))
 
                     # 2) 'specific'
 					if test_cond == 'specific':
                     	# test dataset only contains most specific concepts
 						if nr_possible_contexts == len(self.properties_dim):
-							test.append(self.get_item(concept_idx, context_condition, self._many_hot_encoding, include_concept))
+							test.append(self.get_item(concept_idx, context_condition, self.encoding_method, include_concept))
 						else:
-							train_and_val.append(self.get_item(concept_idx, context_condition, self._many_hot_encoding, include_concept))
+							train_and_val.append(self.get_item(concept_idx, context_condition, self.encoding_method, include_concept))
 
         # Train val split
 		train_samples = int(len(train_and_val)*train_ratio)
@@ -468,7 +480,31 @@ class DataSet(torch.utils.data.Dataset):
 		return output
 
 
+	def _float_range_encoding(self, input_list, float_range=(0.1, 0.9)):
+    	"""
+        Outputs a vector where each attribute is represented by a random float from a specified range.
+        """
+        output = torch.zeros([sum(self.properties_dim)]).to(device=self.device)
+        start = 0
+        float_range_difference = float_range[1] - float_range[0]
 
+        for elem, dim in zip(input_list, self.properties_dim):
+            # For each attribute, the function calculates a segment range by dividing
+            # the total float range diff by the dimension of the attribute.
+            segment_range = (float_range_difference) / dim
+            # Calculates the specific range for the current value
+            value_range_start = float_range[0] + elem * segment_range
+            value_range_end = value_range_start + segment_range
+
+            selected_float = random.uniform(value_range_start, value_range_end)
+
+            # Places the selected float in the corresponding position in the output vector
+            output[start : start + dim] = torch.tensor(
+                [selected_float if i == int(elem) else 0 for i in range(dim)]
+            )
+            start += dim
+
+        return output
 
 def get_distractors_old(self, concept_idx):
 		"""
