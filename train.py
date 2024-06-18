@@ -17,8 +17,9 @@ import os
 import pickle
 
 import dataset
-from archs import Sender, Receiver, RSASender
+from archs import Sender as StandardSender, Receiver as StandardReceiver, RSASender
 from archs_mu_goodman import Speaker, Listener
+from archs_float_encoded_ds import Sender as FloatSender, Receiver as FloatReceiver
 from rsa_tools import get_utterances
 import feature
 import itertools
@@ -278,6 +279,16 @@ def train(opts, datasets, verbose_callbacks=False):
     )
     test = torch.utils.data.DataLoader(test, batch_size=opts.batch_size, shuffle=False)
 
+    # sets sender_class and receiver_class to use correct architecture file based on the encoding method used.
+    if opts.encoding_method_name == "float_range":
+        sender_class = FloatSender
+        receiver_class = FloatReceiver
+    elif opts.encoding_method_name == "one_hot":
+        sender_class = StandardSender
+        receiver_class = StandardReceiver
+    else:
+        raise ValueError(f"Unsupported encoding method: {opts.encoding_method_name}")
+
     # initialize sender and receiver agents
     if opts.mu_and_goodman:
         # use speaker hidden size also for listener (except explicitly given)
@@ -300,10 +311,10 @@ def train(opts, datasets, verbose_callbacks=False):
             )
         )
     else:
-        sender = Sender(
+        sender = sender_class(
             opts.hidden_size, sum(dimensions), opts.game_size, opts.context_unaware
         )
-        receiver = Receiver(sum(dimensions), opts.hidden_size)
+        receiver = receiver_class(sum(dimensions), opts.hidden_size)
 
     minimum_vocab_size = dimensions[0] + 1  # plus one for 'any'
     vocab_size = (
