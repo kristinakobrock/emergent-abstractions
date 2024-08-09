@@ -97,7 +97,8 @@ def get_params(params):
     parser.add_argument("--load_checkpoint", type=bool, default=False,
                         help="Skip training and load pretrained models from checkpoint.")
     parser.add_argument("--load_interaction", type=bool, default=False,
-                        help="If given, load all interactions from previous runs in the folder.")
+                        help="If given, load all interactions from previous runs in the folder. Else, take interaction"
+                             "from the current run.")
     parser.add_argument("--test_rsa", type=str, default=None,
                         help="Use for testing the RSA speaker after training. Can be 'train', 'validation' or 'test'.")
     parser.add_argument("--cost-factor", type=float, default=0.01,
@@ -269,9 +270,11 @@ def train(opts, datasets, verbose_callbacks=False):
                                                    dump_dir=opts.save_interactions_path)
         if opts.test_rsa:
             if opts.load_interaction:
-                # Use interaction for the current run
+                # Load given interaction
                 interaction = torch.load(opts.interaction_path)
-                utterances = get_utterances(vocab_size, max_len, [interaction])
+
+            # Get utterances from the (loaded or current) interaction
+            utterances = get_utterances(vocab_size, max_len, [interaction])
 
             # Set data split
             if opts.test_rsa == 'train':
