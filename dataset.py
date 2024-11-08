@@ -15,7 +15,7 @@ class DataSet(torch.utils.data.Dataset):
 	""" 
 	This class provides the torch.Dataloader-loadable dataset.
 	"""
-	def __init__(self, properties_dim=[3, 3, 3], game_size=10, scaling_factor=10, device='cuda', testing=False, zero_shot=False,
+	def __init__(self, properties_dim=[3, 3, 3], game_size=10, scaling_factor=10, device='cpu', testing=False, zero_shot=False,
                  zero_shot_test=None, sample_context=False, is_shapes3d = False, images = [], labels = []):
 		"""
 		properties_dim: vector that defines how many attributes and features per attributes the dataset should contain, defaults to a 3x3x3 dataset
@@ -39,8 +39,8 @@ class DataSet(torch.utils.data.Dataset):
 			# images can also be feature representations
 			self.images = images
 			self.labels = labels
-			self.properties_dim = [4,4,4]
-			self.all_objects = self.reverse_one_hot()
+			self.properties_dim = [4, 4, 4]
+			self.all_objects = list(set(self.reverse_one_hot()))
 		else:
 			self.properties_dim = properties_dim
 			self.all_objects = self._get_all_possible_objects(properties_dim)
@@ -284,6 +284,7 @@ class DataSet(torch.utils.data.Dataset):
 			# tested for the random suspected impact of random.choice here
 			index = random.sample(indeces, 1)
 			#index = [indeces[0]]
+			# TODO get list of images corresponding to this label and sample one from the list
 			filled_input.append(self.images[index[0]])
 		return torch.tensor(np.array(filled_input), dtype=torch.float32)
 
@@ -400,10 +401,7 @@ class DataSet(torch.utils.data.Dataset):
 			objects: a list with all object-tuples that satisfy the concept
 			fixed: a tuple that denotes how many and which attributes are fixed
 		"""
-		if self.is_shapes3d:# color,   scale,   shape, color and scale, color and shape, scale and shape, color and scale and shape fixed
-			fixed_vectors = [(1,0,0), (0,1,0), (0,0,1), (1,1,0),        (1,0,1),            (0,1,1),       (1,1,1)]
-		else:
-			fixed_vectors = self.get_fixed_vectors(self.properties_dim)	
+		fixed_vectors = self.get_fixed_vectors(self.properties_dim)
 		# create all possible concepts
 		all_fixed_object_pairs = list(itertools.product(self.all_objects, fixed_vectors))
 		
@@ -423,6 +421,22 @@ class DataSet(torch.utils.data.Dataset):
 			if (target_objects, fixed) not in concepts:
 				concepts.append((target_objects, fixed))
 		return concepts
+
+
+	def get_label_to_feat_rep_map(self, labels, feat_reps):
+		# Initialize dictionary of labels to numpy array of feature representations
+		label_to_feat_rep_map = {}
+		# Iterate over all labels and feature representations
+		for label, feat_rep in zip(labels, feat_reps):
+			# Convert label to integer
+			label = int(torch.argmax(label))
+			# Add label and feature representation to dictionary
+			if label in label_to_feat_rep_map:
+				label_to_feat_rep_map[label].append(feat_rep)
+			else:
+				label_to_feat_rep_map[label] = [feat_rep]
+
+		return label_to_feat_rep_map
 
 
 	def get_shared_vectors(self, fixed):

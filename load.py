@@ -7,32 +7,10 @@ from sklearn.model_selection import train_test_split
 
 # code taken from / inspired by https://github.com/XeniaOhmer/language_perception_communication_games/
 
-def coarse_generic_relational_labels(label_map):
-    num_classes = np.max([int(k) for k in label_map.keys()]) + 1
-    output_dicts = [{} for _ in range(len(label_map[0]))]
-    for i in range(num_classes):
-        traits_i = label_map[i]
-        tmp_labels = [np.zeros(num_classes) for _ in range(len(traits_i))]
-        for j in range(num_classes):
-            if i == j:
-                continue
-            traits_j = label_map[j]
-            for ii in range(len(traits_j)):
-                if traits_i[ii] == traits_j[ii]:
-                    tmp_labels[ii][j] = 1
-
-        for j in range(len(tmp_labels)):
-            tmp_labels[j] /= np.sum(tmp_labels[j])
-            output_dicts[j][i] = tmp_labels[j]
-
-    output_dicts = tuple(output_dicts)
-
-    return output_dicts
-
 def get_shape_color_labels(full_labels,
                            trait_idxs=(2, 3, 4)):
     possible_values = [[] for _ in range(len(trait_idxs))]
-    trait_names_by_idx = ['floorHue', 'wallHue', 'color', 'scale', 'shape', 'orientation']
+    # trait_names_by_idx = ['floorHue', 'wallHue', 'color', 'scale', 'shape', 'orientation']
 
     # default trait_idxs set to (2,3,4) corresponding to color, scale, and shape
     extracted_traits = [tuple(entry) for entry in list(full_labels[:, trait_idxs])]
@@ -63,7 +41,6 @@ def get_shape_color_labels(full_labels,
     
     extracted_traits = filtered_traits
 
-    trait_names = [trait_names_by_idx[i] for i in trait_idxs]
     unique_traits = sorted(set(extracted_traits))
     labels = np.zeros((len(extracted_traits), len(unique_traits)))
 
@@ -77,107 +54,55 @@ def get_shape_color_labels(full_labels,
         trait2label_map[traits] = i
         label2trait_map[i] = traits
 
-    # use coarse labels
-    labels_template = coarse_generic_relational_labels(label2trait_map)
-
-    test = coarse_generic_relational_labels(label2trait_map)
-    relational_labels = dict()
-    test_relational_labels = dict()
-    
-    # calculating for individual traits
-    for (i, k) in enumerate(trait_names):
-        relational_labels[k] = labels_template[i]
-        test_relational_labels[k] = test[i]
-
-    # calculating for dual traits
-
-    trait_weights = dict()
-    trait_weights['color-shape'] = [0.5, 0.5]
-    trait_weights['color-size'] = [0.5, 0.5]
-    trait_weights['shape-size'] = [0.5, 0.5]
-
-    relational_labels['color-shape'] = dict()
-    relational_labels['color-size'] = dict()
-    relational_labels['shape-size'] = dict()
-
-    for idx in labels_template[0].keys():
-        relational_labels['color-shape'][idx] = 0
-        relational_labels['color-size'][idx] = 0
-        relational_labels['shape-size'][idx] = 0
-        for (i, k) in enumerate(trait_names):
-            if k == 'color':
-                relational_labels['color-shape'][idx] += trait_weights['color-shape'][0] * labels_template[i][idx]
-                relational_labels['color-size'][idx] += trait_weights['color-shape'][0] * labels_template[i][idx]
-            elif k == 'scale':
-                relational_labels['shape-size'][idx] += trait_weights['shape-size'][1] * labels_template[i][idx]
-                relational_labels['color-size'][idx] += trait_weights['color-size'][1] * labels_template[i][idx]
-            elif k == 'shape':
-                relational_labels['shape-size'][idx] += trait_weights['shape-size'][0] * labels_template[i][idx]
-                relational_labels['color-shape'][idx] += trait_weights['color-shape'][1] * labels_template[i][idx]
-
-    # calculating for all traits
-    relational_labels['all'] = dict()
-    for k in labels_template[0].keys():
-        relational_labels['all'][k] = 0
-        for lab in labels_template:
-            relational_labels['all'][k] += 1 / len(labels_template) * lab[k]
-
     # generating one-hot labels
     for (i, traits) in enumerate(extracted_traits):
         labels[i, trait2label_map[traits]] = 1
-    return labels, relational_labels, keeper_idxs, trait_weights
+    return labels, keeper_idxs
 
 
-def load_data(input_shape, normalize=True,
+def load_data(normalize=True,
               subtract_mean=True,
-              trait_weights=None,
-              return_trait_weights=False,
-              return_full_labels=False,
-              datapath=None):
-    
-    assert return_trait_weights + return_full_labels < 2, 'only can return one of trait_weights or full_labels'
-
-    if datapath is None:
-        data_path = '3dshapes/3dshapes.h5'
-    else:
-        data_path = datapath
-    parent_dir = str(pathlib.Path().absolute()).split('/')[-1]
-    if parent_dir == 'SimilarityGames':
-        data_path = data_path[3:]
+              data_path='3dshapes/3dshapes.h5'):
     try:
+        print("Loading data from: ", data_path)
         dataset = h5py.File(data_path, 'r')
     except:
-        raise ValueError("h5 file was not found at given path: ", data_path, " please download the h5 file for the dataset and give the correct path to it's location")
-    
-    data = dataset['images'][:]
-    full_labels = dataset['labels'][:]
-    labels_reg, labels_relational, keeper_idxs, trait_weights = get_shape_color_labels(full_labels)
+        raise ValueError(f"{data_path} not found. Please download the shapes3d dataset or specify the correct path.")
 
-    # chooses one of 3 variables to return as the meta variable - note, only one of the boolean return
-    # variables should be set to True
-    if return_full_labels:
-        meta = full_labels
-    elif return_trait_weights:
-        meta = trait_weights
-    else:
-        meta = labels_relational
+    img_data = dataset['images'][:]
+    full_labels = dataset['labels'][:]
+    labels_reg, keeper_idxs = get_shape_color_labels(full_labels)
 
     if keeper_idxs is not None:
-        data = np.array([data[idx] for idx in keeper_idxs])
+        # img_data = np.array([img_data[idx] for idx in keeper_idxs])
+        img_data = img_data[keeper_idxs]
 
-    full_data = data.reshape((data.shape[0],
-                                    input_shape[0], input_shape[1], input_shape[2]))
+    # Reshape (96000, 64, 64, 3) to (96000, 3, 64, 64) for torch conv layers
+    img_data = img_data.transpose((0, 3, 1, 2))
 
+    # Preprocess data
+    # if normalize:
+    #     img_data = img_data.astype("float32") / 255.0
+    # if subtract_mean:
+    #     tmp_data = img_data.reshape(img_data.shape[1], -1)
+    #     mean = np.mean(tmp_data, axis=1)
+    #     img_data = img_data - mean
     if normalize:
-
-        full_data = full_data.astype("float32") / 255.0
+        img_data = img_data.astype("float32") / 255.0
 
     if subtract_mean:
-        
-        tmp_data = full_data.reshape(full_data.shape[1], -1)
+        # Compute the mean per channel across all images and pixels
+        mean = np.mean(img_data, axis=(0, 2, 3), keepdims=True)
+        img_data = img_data - mean
 
-        mean = np.mean(tmp_data, axis=1)
+    return img_data, labels_reg, full_labels
 
-        full_data = full_data - mean
 
-    return full_data, labels_reg, meta
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+    full_data, labels_reg, _ = load_data(normalize=False, subtract_mean=False)
+    print(f"Shape of full_data: {full_data.shape}")
+    idx = np.random.randint(0, len(full_data))
+    print(f"Label for img at {idx}: {np.argmax(labels_reg[idx])}")
+    plt.imshow(full_data[idx].transpose(1, 2, 0).astype(np.uint8))
+    plt.show()

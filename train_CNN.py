@@ -4,7 +4,7 @@ import numpy as np
 from tqdm import tqdm
 from load import load_data
 from vision_module import vision_module
-from create_datasets import shapes_dataset
+from create_datasets import ShapesDataset
 
 def get_params():
 
@@ -16,13 +16,13 @@ def get_params():
     parser.add_argument('--weight_decay', type=float, default=0.0001,
                         help="Weight decay for the training")
     
-    parser.add_argument('--epochs', type=int, default=10, 
+    parser.add_argument('--epochs', type=int, default=15,
                         help="How many epochs to train for")
     
     parser.add_argument('--test_every', type=int, default=5, 
                         help="After how many training epochs each test runs are to be conducted")
     
-    parser.add_argument('--save_model', type=bool, default=False,
+    parser.add_argument('--save_model', type=bool, default=True,
                         help="Use if you want to save the model after training")
     
     parser.add_argument('--train_split', type=float, default=0.8,
@@ -31,65 +31,63 @@ def get_params():
     parser.add_argument('--batch_size', type=int, default=32,
                         help="Give batch size for training")
     
-    parser.add_argument('--generate_dataset', type=bool, default=False,
-                        help="Determine whether to generate the dataset with the saved model")
-    
     args = parser.parse_args()
 
     return args
 
+def transform_data(data):
+    data = data.astype("float32") / 255.0
+    # Compute the mean per channel across all images and pixels
+    mean = np.mean(data, axis=(1, 2), keepdims=True)
+    data = data - mean
+    return data
 
 def train(args):
     # first load the dataset and define all parts necessary for the training
     # try to load the dataset if it was saved before
+    dataset_path = ('dataset/complete_dataset_20241027_norm')
     try:
-
-        complete_data = torch.load('./dataset/complete_dataset')
-
+        complete_data = torch.load(dataset_path)
         print('Dataset was found and loaded successfully')
 
     # otherwise create the dataset and save it to the folder for repeated use
     except:
-
         print('Dataset was not found, creating it instead...')
-        input_shape = [3,64,64]
-        
-        full_data, labels_reg, full_labels = load_data(input_shape, normalize=False,
-                                                                        subtract_mean=False,
-                                                                        trait_weights=None,
-                                                                        return_trait_weights=False,
-                                                                        return_full_labels=True,
-                                                                        datapath=None)
-        
-        complete_data = shapes_dataset(full_data, labels_reg)
+        full_data, labels_reg, _ = load_data(normalize=False, subtract_mean=False)
+        complete_data = ShapesDataset(full_data, labels_reg, transform=None)
+        torch.save(complete_data, dataset_path)
+        print(f'Dataset was created and saved to {dataset_path}')
 
-        torch.save(complete_data, './dataset/complete_dataset')
-
-        print('Dataset was created and saved in /dataset')
-
-
+    complete_data = ShapesDataset(complete_data.images, complete_data.labels, transform=transform_data)
     train_size = int(args.train_split * len(complete_data))
     test_size = len(complete_data) - train_size
+
+    print(f'Training on {train_size} samples and testing on {test_size} samples')
     
     train_data, test_data = torch.utils.data.random_split(complete_data, [train_size, test_size])
 
     # init both dataloaders with corresponding datasets
     train_loader = torch.utils.data.DataLoader(train_data,
-                                            batch_size = args.batch_size, 
-                                            shuffle = True,
-                                            pin_memory = True)
+                                               batch_size=args.batch_size,
+                                               shuffle=True,
+                                               pin_memory=True)
 
     test_loader = torch.utils.data.DataLoader(test_data,
-                                            batch_size = args.batch_size, 
-                                            shuffle = False,
-                                            pin_memory = True)
+                                              batch_size=args.batch_size,
+                                              shuffle=False,
+                                              pin_memory=True)
 
     # init vision module to train
     model = vision_module(num_classes=64)
 
-    # use gpu if possible
     if torch.cuda.is_available():
-            model.cuda()
+        device = torch.device('cuda')  # Use NVIDIA GPU
+    elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
+        device = torch.device('mps')  # Use Apple GPU
+    else:
+        device = torch.device('cpu')
+
+    model.to(device)
 
     # use SGD as optimizer
     optimizer = torch.optim.SGD(model.parameters(),
@@ -110,89 +108,84 @@ def train(args):
     print('Starting training for ', args.epochs, ' epochs\n')
     for epoch in range(args.epochs):
         print("Epoch ", epoch+1)
-
-        # lists to calculate the values for each
-        temp_losses = []
-        temp_accs = []
-
         model.train()
+        train_loss, train_acc = 0., 0.
         
         for i, (input, target) in tqdm(enumerate(train_loader)):
-
-            if torch.cuda.is_available():
-                input = input.cuda()
-                target = target.cuda()
+            input = input.to(device)
+            target = target.to(device=device, dtype=torch.float32)
             
             # compute network prediction and use it for loss
             output = model(input)
+            output = output.to(device=device)
             loss = criterion(output, target)
+            train_loss += loss.item()
             # optimization step
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-            # compute accuracy for each single entry per batch
-            for single_output, single_target in zip(output, target):
-                if np.argmax(single_output.cpu().detach().numpy()) == np.argmax(single_target.cpu().detach().numpy()):
-                    temp_accs.append(1.0)
-                else:
-                    temp_accs.append(0.0)
-            
-            temp_losses.append(float(loss))
+            accuracies = torch.argmax(output, dim=1) == torch.argmax(target, dim=1)
+            batch_accuracy = torch.mean(accuracies.float())
+            train_acc += batch_accuracy.item()
 
         # add accuracy and loss for each epoch
-        train_accuracies.append(sum(temp_accs)/len(temp_accs))
-        train_losses.append(sum(temp_losses)/len(temp_losses))
+        epoch_loss = train_loss / len(train_loader)
+        epoch_acc = train_acc / len(train_loader)
+        train_accuracies.append(epoch_acc)
+        train_losses.append(epoch_loss)
 
         # print most recent entry to our loss and accuracy lists
-        print("Epoch ", epoch+1, " achieved training loss: ~", round(train_losses[-1], 3)," and training accuracy: ~", round(train_accuracies[-1], 3), "\n")
+        print("Epoch ", epoch+1, " training loss: ~", round(train_losses[-1], 5)," training accuracy: ~", round(train_accuracies[-1], 5), "\n")
 
         # test every X epoch as given by test_every
         if ((epoch+1) % args.test_every) == 0:
-
             test_loss, test_acc = test(test_loader, model, criterion)
             test_losses.append(test_loss)
             test_accuracies.append(test_acc)
     
     if args.save_model:
+        model_path = 'models/vision_module_mps'
         model.cpu()
-        torch.save(model.state_dict(), './models/vision_module')
+        torch.save(model.state_dict(), model_path)
+        print(f'Model was saved to {model_path}')
     
     return train_losses, train_accuracies, test_losses, test_accuracies
 
-def test(test_loader, model, criterion):    
 
+def test(test_loader, model, criterion):    
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+    elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
+        device = torch.device('mps')
+    else:
+        device = torch.device('cpu')
+    model = model.to(device)
     model.eval()
+
+    total_loss, total_accuracy = 0., 0.
 
     with torch.no_grad():
          print('Starting test run')
-         temp_losses = []
-         temp_accs = []
          for i, (input, target) in tqdm(enumerate(test_loader)):
-            if torch.cuda.is_available():
-                input = input.cuda()
-                target = target.cuda()
+            input = input.to(device)
+            target = target.to(device=device, dtype=torch.float32)
             
             # compute network prediction and use it for loss
             output = model(input)
+            output = output.to(device=device)
             loss = criterion(output, target)
-
-            # compute accuracy for each single entry per batch
-            for single_output, single_target in zip(output, target):
-                if np.argmax(single_output.cpu().detach().numpy()) == np.argmax(single_target.cpu().detach().numpy()):
-                    temp_accs.append(1.0)
-                else:
-                    temp_accs.append(0.0)
-
-            temp_losses.append(float(loss))
+            total_loss += loss.item()
+            accuracies = torch.argmax(output, dim=1) == torch.argmax(target, dim=1)
+            total_accuracy += torch.mean(accuracies.float()).item()
 
     # add accuracy and loss
-    loss = sum(temp_losses)/len(temp_losses)
-    acc = sum(temp_accs)/len(temp_accs)
+    epoch_loss = total_loss / len(test_loader)
+    epoch_acc = total_accuracy / len(test_loader)
 
-    print("test loss was: ~", round(loss, 3), "and test accuracy was: ~", round(acc, 3), "\n")
+    print("test loss was: ~", round(epoch_loss, 5), "and test accuracy was: ~", round(epoch_acc, 5), "\n")
     
-    return loss, acc
+    return epoch_loss, epoch_acc
 
 if __name__ == "__main__":
 

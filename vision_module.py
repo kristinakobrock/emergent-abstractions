@@ -1,5 +1,6 @@
 import torch.nn as nn
 import torch.nn.functional as F
+import torch
 
 class vision_module(nn.Module):
     """
@@ -16,10 +17,9 @@ class vision_module(nn.Module):
         self.dense2 = nn.Linear(in_features = 180, out_features = 100)
 
         self.classification = nn.Linear(in_features = 100, out_features = num_classes)
-        self.softmax = nn.Softmax(dim=0)
-    
+
     def forward(self, x):
-        x = x.float()
+        x = x.to(device='mps', dtype=torch.float32)
         out = self.pool(F.relu(self.conv1(x)))
         out = F.relu(self.conv2(out))
 
@@ -30,10 +30,15 @@ class vision_module(nn.Module):
         out = F.relu(self.dense2(out))
 
         out = self.classification(out)
-        out = self.softmax(out)
 
         return out
 
+    def predict(self, x):
+        if len(x.shape) == 3:
+            x = x.unsqueeze(0)
+        out = self.forward(x)
+        out = self.softmax(out)
+        return out
 
 class feat_rep_vision_module(nn.Module):
     """
@@ -50,7 +55,7 @@ class feat_rep_vision_module(nn.Module):
         self.dense2 = nn.Linear(in_features = 180, out_features = 100)
     
     def forward(self, x):
-        x = x.float()
+        x = x.to(device='mps', dtype=torch.float32)
         out = self.pool(F.relu(self.conv1(x)))
         out = F.relu(self.conv2(out))
 
