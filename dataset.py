@@ -19,11 +19,14 @@ class DataSet(torch.utils.data.Dataset):
 
     def __init__(self, properties_dim=[3, 3, 3], game_size=10, scaling_factor=10, device='cuda', testing=False,
                  zero_shot=False, zero_shot_test=None, sample_context=False, granularity="mixed", is_shapes3d=False,
-                 images=[], labels=[], shared_context=False):
+                 images=[], labels=[], shared_context=False, split_by_attribute=False, percentage_a=0.8):
         """
         properties_dim: vector that defines how many attributes and features per attributes the dataset should contain,
         defaults to a 3x3x3 dataset
         game_size: integer that defines how many targets and distractors a game consists of
+        split_by_attribute: new parameter that creates a dataset, where one attribute has higher 
+        discriminative value than others.
+        percentage_a: use for split_by_attribute; variable to manipulate the proporion of subset A in the train+val dataset. default: 80%
         """
         super().__init__()
 
@@ -34,6 +37,8 @@ class DataSet(torch.utils.data.Dataset):
         self.sample_context = sample_context
         self.granularity = granularity
         self.shared_context = shared_context
+        self.split_by_attribute = split_by_attribute
+        self.percentage_a = percentage_a
 
         # check if granularity has one of the allowed values
         if granularity not in ["mixed", "fine", "coarse"]:
@@ -60,14 +65,29 @@ class DataSet(torch.utils.data.Dataset):
         # get all concepts
         self.concepts = self.get_all_concepts()
 
+        """ 
+        for split_by_attribute:
+        randomly choose one attribute which will be highly important 
+        for discriminating between targets and distractors in the subset A.
+        """ 
+        self.discriminative_attribute = random.choice(range(len(self.properties_dim)))
+
         # generate dataset
-        if not testing and not zero_shot:
+        if not testing and not zero_shot and not split_by_attribute:
             self.dataset = self.get_datasets(split_ratio=SPLIT)
-        if zero_shot:
+        elif zero_shot:
             # check if zero_shot_test has one of the allowed values
             if zero_shot_test not in ["specific", "generic", None]:
                 raise ValueError("zero_shot_test is", zero_shot_test, "but must be either 'specific' or 'generic'.")
+            if split_by_attribute:
+                raise ValueError("zero_shot is incompatible with split_by_attribute.")
             self.dataset = self.get_zero_shot_datasets(split_ratio=SPLIT_ZERO_SHOT, test_cond=zero_shot_test)
+        elif split_by_attribute:
+            if not shared_context:
+                raise ValueError("split_by_attribute requires shared_context to be true.")
+            if granularity != "mixed":
+                raise ValueError("split_by_attribute requires mixed granularity.")
+            self.dataset = self.get_split_by_attribute(self.percentage_a)
 
     def __len__(self):
         """Returns the total amount of samples in dataset."""
@@ -247,6 +267,97 @@ class DataSet(torch.utils.data.Dataset):
 
         return train, val, test
 
+    def get_split_by_attribute(self, percentage_a):
+        """
+        Creates two subsets, A and B, based on a randomly chosen attribute (discriminative_attribute).
+        Requirements: 
+            shared_context must be true. This function assumes it is true based on the check in init!
+        Subset A: 
+            Concept-context pairs where targets and distractors differ only in discriminative_attribute:
+            discriminative_attribute is fixed, context is "fine", and the discriminative_attribute is NOT shared with distractors.
+            This way, one randomly chosen attribute is highly important for discrimination between targets and distractors.
+        Subset B:
+            All other concept-context pairs, where discriminative_attribute is not important for
+            discrimination beween targets and distractors.
+        The function then splits these two subsets for training, validation, and testing (see comment below for splitting logic).
+        """
+        # subset A constitutes 0-100% of the train+val dataset
+        if percentage_a > 1 or percentage_a < 0:
+            raise ValueError("percentage_a must be between 0 and 1")
+
+        subset_a=[] #concept-context pairs where one randomly chosen attribute is highly discriminative
+        subset_b=[] #other concept-context pairs
+        print(f"Creating subsets A and B based on randomly chosen attribute. Attribute index: {self.discriminative_attribute}")
+
+        for concept_idx in tqdm(range(len(self.concepts))):
+            target_objects, fixed = self.concepts[concept_idx]
+            # the amount of possible context conditions is the amount of fixed attrbutes (e.g. 1 attribute fixed -> one condition possible)
+            nr_possible_contexts = sum(fixed)
+
+            # variable to check if the randomly chosen attribute X is fixed in the concept (returns True or False)
+            attribute_is_fixed = fixed[self.discriminative_attribute] == 1
+
+            # for subset A: choose the concept-context pairs, where 1) the randomly chosen attribute is fixed,
+            # 2)context is shared (already assumed in init), 3) granularity is fine and 4) the chosen attribute is not shared with distractors
+            for _ in range(self.scaling_factor):
+                # check if chosen attribute is fixed
+                if attribute_is_fixed:
+                   for context_condition in range(nr_possible_contexts):
+                       # choose the finest possible context condition, for example for 2-attribute concept it will be the condition "1"
+                       if context_condition == nr_possible_contexts - 1: 
+                          # call get_distractors_shared with split_by_attribute_subset_a=True to influence shared_attr_indices selection
+                          _, shared_attr_indices = self.get_distractors_shared(concept_idx, context_condition, split_by_attribute_subset_a=True)
+                          # check if the discriminative attribute is NOT in the shared attributes for subset A
+                          if self.discriminative_attribute not in shared_attr_indices:
+                              subset_a.append(self.get_item(concept_idx, context_condition, self.encoding_func, include_concept=False))
+                          #else:
+                              #subset_b.append(self.get_item(concept_idx, context_condition, self.encoding_func, include_concept=False))
+                       else:
+                          # if context condition is not fine, add to subset B
+                          subset_b.append(self.get_item(concept_idx, context_condition, self.encoding_func, include_concept=False))
+                else:
+                    # if the discriminative attribute is not fixed, add to subset B
+                     for context_condition in range(nr_possible_contexts):
+                         subset_b.append(
+                             self.get_item(concept_idx, context_condition, self.encoding_func, include_concept=False))
+
+        print(f"Subset A size: {len(subset_a)}")
+        print(f"Subset B size: {len(subset_b)}")
+
+        """
+        Splitting logic.
+        Now, subsets A and B are used to create train, val and test datasets.
+        The whole subset A and a portion of subset B are used for training and validation.
+        The parameter "percentage_a" determines the proportion of the train+val dataset that comes from subset A.
+        For example, if percentage_a is 0.8, 80% of the train+val samples are taken from subset A,
+        and the remaining 20% come from subset B.
+        """
+
+        # calculate number of samples from subset B that will be used for train+val
+        number_b_for_train_val = int(len(subset_a)/percentage_a) - len(subset_a)
+        # randomly sample the needed amount of concept-context pairs from subset B
+        random.shuffle(subset_b)
+        b_train_val = subset_b[:number_b_for_train_val]
+        # remaining part of subset B is used for testing
+        test = subset_b[number_b_for_train_val:]
+
+        # combine train+val samples from subsets A and B
+        train_and_val = subset_a + b_train_val
+        random.shuffle(train_and_val) # shuffle the combined pool
+
+        train_samples = int(len(train_and_val) * 0.75) # train is 75% of train and val
+        val_samples = len(train_and_val) - train_samples # take the rest for validation (25% of train and val)
+        train, val = torch.utils.data.random_split(train_and_val, [train_samples, val_samples])
+        # save information about train dataset
+        train.dimensions = self.properties_dim
+
+        print("\nFinal Dataset Sizes:")
+        print(f"Train dataset size: {len(train)}")
+        print(f"Validation dataset size: {len(val)}")
+        print(f"Test dataset size: {len(test)}")
+
+        return train, val, test
+
     def get_item(self, concept_idx, context_condition, encoding_func, include_concept=False):
         """
         Receives concept-context pairs and an encoding function.
@@ -380,11 +491,13 @@ class DataSet(torch.utils.data.Dataset):
 
         return context
 
-    def get_distractors_shared(self, concept_idx, context_condition, shared_attr_indices=None):
+    def get_distractors_shared(self, concept_idx, context_condition, shared_attr_indices=None, split_by_attribute_subset_a=False):
         """
         Computes distractors for a shared context between sender and receiver. It also implements a change compared
         to get_distractors(): Here, objects in the context do not only share a certain number of attributes, but also
         the position of the attributes that are shared are fixed (and shared between sender and receiver).
+        split_by_attribute_subset_a: used for split_by_attribute to manipulate which attributes can be sahred between targets
+        and distractors for subset A.
         """
         all_target_objects, fixed = self.concepts[concept_idx]
         context = []
@@ -397,11 +510,21 @@ class DataSet(torch.utils.data.Dataset):
 
         # if not given, compute (this is the case for the sender)
         if not shared_attr_indices:
-            # generate a shared vector, i.e. a vector that indicates which of the attributes should be shared with the
-            # concept attributes according to the context condition
-            # e.g. if fixed==(1,1,1) and context_condition==2, then shared vector can be one of: (1,1,0), (1,0,1), (0,1,1)
-            # which attributes should be shared:
-            shared_attr_indices = random.sample(fixed_attr_indices, context_condition)
+            """
+            Generate a shared vector, i.e. a vector that indicates which of the attributes should be shared with the
+            concept attributes according to the context condition
+            e.g. if fixed==(1,1,1) and context_condition==2, then shared vector can be one of: (1,1,0), (1,0,1), (0,1,1)
+            If the dataset is generated with split_by_attribute: for concepts-context pairs in subset A,
+            the discriminative attribute cannot be shared between targets and distractors.
+            Meaning, if the discriminative attribute is fixed and the context granularity is "fine",
+            the concept-context pair should go into subset A, and discriminative attribute cannot be sahred with distractors.
+            """
+            if split_by_attribute_subset_a and self.discriminative_attribute in fixed_attr_indices and context_condition == sum(fixed) -1:
+                 # exclude the discriminative attribute from the pool of attributes to be shared
+                 attributes_to_be_shared = [attr for attr in fixed_attr_indices if attr != self.discriminative_attribute]
+                 shared_attr_indices = random.sample(attributes_to_be_shared, context_condition)
+            else:
+                 shared_attr_indices = random.sample(fixed_attr_indices, context_condition)
 
         # consider all objects as possible distractors
         poss_dist = self.all_objects
