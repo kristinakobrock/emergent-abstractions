@@ -703,6 +703,40 @@ def symbol_frequency(interaction, n_attributes, n_values, vocab_size, is_gumbel=
                     symbol_frequency[level] += np.count_nonzero(message == fav_symbol)
 
     return symbol_frequency / att_val_frequency, mutual_information
+    
+# the function symbol_frequency_MI copied from zero_shot repository
+def symbol_frequency_MI(interaction, n_attributes, n_values, vocab_size, is_gumbel=True):
+    messages = interaction.message.argmax(dim=-1) if is_gumbel else interaction.message
+    messages = messages[:, :-1]  # without EOS
+    sender_input = interaction.sender_input
+    n_objects = sender_input.shape[1]
+    n_targets = int(n_objects / 2)
+    target_objects = sender_input[:, :n_targets]
+    target_objects = k_hot_to_attributes(target_objects, n_values)
+    (objects, fixed) = retrieve_concepts_sampling(target_objects)
+
+    # attributes which are not fixed are irrelevant to the concept and do not need to be communicated
+    objects[fixed == 0] = np.nan
+
+    favorite_symbol_MI = {}
+    mutual_information = {}
+    # find symbol with highest MI for each value at each attribute position (i.e., position sensitive)
+    for att in range(n_attributes):
+        for val in range(n_values):
+            object_labels = (objects[:, att] == val).astype(int)
+            max_MI = 0
+            for symbol in range(vocab_size):
+                symbol_indices = np.argwhere(messages == symbol)[0]
+                symbol_labels = np.zeros(len(messages))
+                symbol_labels[symbol_indices] = 1
+                MI = normalized_mutual_info_score(symbol_labels, object_labels)
+                if MI > max_MI:
+                    max_MI = MI
+                    max_symbol = symbol
+            favorite_symbol_MI[str(att) + str(val)] = max_symbol
+            mutual_information[str(att) + str(val)] = max_MI
+
+    return favorite_symbol_MI, mutual_information
 
 def symbol_frequency_fav(interaction, n_attributes, n_values, vocab_size, is_gumbel=True, trim_eos=False,
                        max_mess_len=None):
