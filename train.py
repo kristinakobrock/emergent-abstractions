@@ -1,5 +1,10 @@
 # code based on https://github.com/XeniaOhmer/hierarchical_reference_game/blob/master/train.py
 # and https://github.com/jayelm/emergent-generalization/blob/master/code/train.py
+#the next 4 lines are for using my local modified EGG (needed for early_stopping to work)
+import sys
+sys.path.insert(0, r"C:\Users\metel\OneDrive\Desktop\EGG-final\EGG")
+import egg
+print("Using EGG from:", egg.__file__)
 
 import argparse
 import torch
@@ -159,7 +164,7 @@ def train(opts, datasets, verbose_callbacks=False):
     """
 
     if opts.save:
-        if not opts.test_rsa and not opts.save_test_interactions and not opts.zero_shot:
+        if not opts.test_rsa and not opts.zero_shot: # here, I deleted "and not opts.save_test_interactions" (otehrwise test interactions were saved incorrectly)
             # make folder for new run
             latest_run = len(os.listdir(opts.game_path))
             opts.save_path = os.path.join(opts.game_path, str(latest_run))
@@ -507,8 +512,9 @@ def main(params):
                 opts.save_interactions_path = os.path.join(opts.game_path, str(run), 'interactions')
             else:
                 opts.save_interactions_path = os.path.join(opts.game_path, str(run), 'interactions')
-            if not os.path.exists(opts.save_interactions_path) and opts.save:
-                os.makedirs(opts.save_interactions_path)
+                opts.save_path = os.path.join(opts.game_path, str(run)) # added this line
+           # if not os.path.exists(opts.save_interactions_path) and opts.save:
+             #   os.makedirs(opts.save_interactions_path)
 
         # zero-shot                
         if opts.zero_shot:
