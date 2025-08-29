@@ -41,7 +41,7 @@ if not os.path.exists('data/'):
 sample = ''
 if args.sample_context:
     sample = sample + '_context_sampled'
-if args.shared_context  and not args.split_by_attribute:
+if args.shared_context and not args.split_by_attribute:
     sample = sample + '_shared_context'
 if args.split_by_attribute:
     sample = sample + '_split_by_attribute'
