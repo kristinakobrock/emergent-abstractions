@@ -6,7 +6,7 @@ import copy
 
 def load_accuracies(all_paths, n_runs=5, n_epochs=300, val_steps=10, zero_shot=False, context_unaware=False,
                     length_cost=False, early_stopping=False, rsa=False, rsa_test=None, zero_shot_test_ds=None,
-                    sampled_context=False, hierarchical=False, shared_context=False):
+                    sampled_context=False, hierarchical=False, shared_context=False, split_by_attribute=False, split_test_ds=None):
     """ loads all accuracies into a dictionary, val_steps should be set to the same as val_frequency during training
     """
     result_dict = {'train_acc': [], 'val_acc': [], 'test_acc': [],
@@ -87,17 +87,23 @@ def load_accuracies(all_paths, n_runs=5, n_epochs=300, val_steps=10, zero_shot=F
         if hierarchical:
             context_unaware_path = context_unaware_path + '/hierarchical'
             context_aware_path = context_aware_path + '/hierarchical'
-        if shared_context:
+        if shared_context and not split_by_attribute:
             context_unaware_path = context_unaware_path + '/shared_context'
             context_aware_path = context_aware_path + '/shared_context'
+        if split_by_attribute:
+            context_unaware_path = context_unaware_path + '/split_by_attribute'
+            context_aware_path = context_aware_path + '/split_by_attribute'
         length_cost_path = "length_cost"
         zero_shot_path = "zero_shot"
         if rsa:
             rsa_file_extension = rsa_test
         file_name = "loss_and_metrics"
         file_name_zs_default = "loss_and_metrics"
+        file_name_split = ""
         if zero_shot_test_ds is not None:
             file_name_zs = str("loss_and_metrics_" + zero_shot_test_ds)
+        if split_test_ds is not None:
+            file_name_split = str("loss_and_metrics_" + split_test_ds)
         file_extension = "pkl"
 
         for run in range(n_runs):
@@ -107,7 +113,7 @@ def load_accuracies(all_paths, n_runs=5, n_epochs=300, val_steps=10, zero_shot=F
             # context-aware (standard)
             if not context_unaware and not length_cost and not zero_shot:
                 if rsa_test is None:
-                    file_path = f"{path}/{standard_path}/{run_path}/{file_name}.{file_extension}"
+                    file_path = f"{path}/{run_path}/{file_name}.{file_extension}"
                     data = pickle.load(open(file_path, 'rb'))
                     # train and validation accuracy
                     lists = sorted(data['metrics_train0'].items())
@@ -118,7 +124,10 @@ def load_accuracies(all_paths, n_runs=5, n_epochs=300, val_steps=10, zero_shot=F
                     if (len(val_acc) > n_epochs // val_steps) and not early_stopping:  # old: we had some runs where we set val freq to 5 instead of 10
                         val_acc = val_acc[::2]
                     val_accs.append(val_acc)
-                    test_accs.append(data['final_test_acc'])
+                    if split_test_ds is not None:
+                        file_path_test = f"{path}/{run_path}/{file_name_split}.{file_extension}"
+                        data_test = pickle.load(open(file_path_test, 'rb'))
+                        test_accs.append(data_test['final_test_acc'])
                     # message lengths
                     lists = sorted(data['metrics_train1'].items())
                     _, train_message_length = zip(*lists)
@@ -546,7 +555,7 @@ def load_accuracies_rsa_zero_shot(all_paths, result_dict=None, n_runs=5, setting
 
 def load_entropies(all_paths, n_runs=5, context_unaware=False, length_cost=False, rsa=False, rsa_test=None,
                    sampled_context=False, test_interactions=False, test_mode=None, hierarchical=False,
-                   shared_context=False, verbose=False):
+                   shared_context=False, verbose=False, split_by_attribute=False):
     """ loads all entropy scores into a dictionary"""
 
     if sampled_context:
@@ -565,8 +574,10 @@ def load_entropies(all_paths, n_runs=5, context_unaware=False, length_cost=False
             setting = 'standard' + path_sc
     if hierarchical:
         setting = setting + '/hierarchical'
-    if shared_context:
+    if shared_context and not split_by_attribute:
         setting = setting + '/shared_context'
+    if split_by_attribute:
+        setting = setting + '/split_by_attribute'
 
     if rsa:
         rsa_file_extension = '_rsa_' + rsa_test
