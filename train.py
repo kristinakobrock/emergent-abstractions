@@ -124,6 +124,10 @@ def get_params(params):
                         help="Determines whether 3dshapes dataset will be used or not")
     parser.add_argument('--shared_context', type=bool, default=False,
                         help='Use for generating datasets with a shared context.')
+    parser.add_argument('--split_by_attribute', type=bool, default=False,
+                        help= 'Use for generating dataset with highly discriminative attribute.')
+    parser.add_argument("--percentage_a", type=float, default=0.8,
+                        help="Used for split_by_attribute, proportion of subset A ih the train+val set")
 
     args = core.init(parser, params)
 
@@ -183,7 +187,7 @@ def train(opts, datasets, verbose_callbacks=False):
     # print("train", train)
     dimensions = train.dimensions
 
-    train = torch.utils.data.DataLoader(train, batch_size=opts.batch_size, shuffle=True)
+    train = torch.utils.data.DataLoader(train, batch_size=opts.batch_size, shuffle=True, drop_last=True)
     val = torch.utils.data.DataLoader(val, batch_size=opts.batch_size, shuffle=False, drop_last=True)
     test = torch.utils.data.DataLoader(test, batch_size=opts.batch_size, shuffle=False)
 
@@ -403,8 +407,10 @@ def main(params):
                 opts.game_setting = 'length_cost/context_aware'
             else:
                 opts.game_setting = 'length_cost/no_cost_context_aware'
-    if opts.shared_context:
+    if opts.shared_context and not opts.split_by_attribute:
         opts.game_setting = opts.game_setting + '/shared_context'
+    if opts.split_by_attribute:
+        opts.game_setting = opts.game_setting + '/split_by_attribute'
 
     # create subfolders if necessary
     # The granularity subfolders are created only when the granularity is not 'mixed'
@@ -420,7 +426,7 @@ def main(params):
 
     # if name of precreated data set is given, load dataset
     if opts.load_dataset:
-        data_set = torch.load(opts.path + 'data/' + opts.load_dataset)
+        data_set = torch.load(opts.path + 'data/' + opts.load_dataset, weights_only=False)
         print('data loaded from: ' + 'data/' + opts.load_dataset)
         if not opts.zero_shot:
             # create subfolder if necessary
@@ -440,7 +446,9 @@ def main(params):
                                            device=opts.device,
                                            sample_context=opts.sample_context,
                                            granularity=opts.granularity,
-                                           shared_context=opts.shared_context)
+                                           shared_context=opts.shared_context,
+                                           split_by_attribute=opts.split_by_attribute,
+                                           percentage_a=opts.percentage_a)
 
             # save folder for opts rsa is already specified above
             if not opts.test_rsa and not opts.save_test_interactions:
