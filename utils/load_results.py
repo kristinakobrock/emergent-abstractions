@@ -515,9 +515,14 @@ def load_accuracies(all_paths, n_runs=5, n_epochs=300, val_steps=10, zero_shot=F
                 result_dict['zs_generic_rsa_test_acc'].append(zs_generic_rsa_test_accs)
                 result_dict['zs_generic_rsa_test_loss'].append(zs_generic_rsa_test_losses)
 
+    #changed to fix when using early_stopping, otherwise loading accuracies over multiple runs with different
+    # n_epochs didn't work properly
     for key in result_dict.keys():
-        result_dict[key] = np.array(result_dict[key])
-
+        try:
+            result_dict[key] = np.array(result_dict[key])
+        except ValueError:
+            # keeping jagged lists (like train_acc, val_acc) as lists
+            pass
     return result_dict
 
 

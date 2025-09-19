@@ -704,7 +704,7 @@ def symbol_frequency(interaction, n_attributes, n_values, vocab_size, is_gumbel=
 
     return symbol_frequency / att_val_frequency, mutual_information
     
-# the function symbol_frequency_MI copied from zero_shot repository
+# the function symbol_frequency_MI copied from zero_shot repository, used in split_analysis_mi_scores.ipynb
 def symbol_frequency_MI(interaction, n_attributes, n_values, vocab_size, is_gumbel=True):
     messages = interaction.message.argmax(dim=-1) if is_gumbel else interaction.message
     messages = messages[:, :-1]  # without EOS
@@ -726,6 +726,47 @@ def symbol_frequency_MI(interaction, n_attributes, n_values, vocab_size, is_gumb
             object_labels = (objects[:, att] == val).astype(int)
             max_MI = 0
             for symbol in range(vocab_size):
+                symbol_indices = np.argwhere(messages == symbol)[0]
+                symbol_labels = np.zeros(len(messages))
+                symbol_labels[symbol_indices] = 1
+                MI = normalized_mutual_info_score(symbol_labels, object_labels)
+                if MI > max_MI:
+                    max_MI = MI
+                    max_symbol = symbol
+            favorite_symbol_MI[str(att) + str(val)] = max_symbol
+            mutual_information[str(att) + str(val)] = max_MI
+
+    return favorite_symbol_MI, mutual_information
+
+# symbol_frequency_MI modified for length cost datasets, used in split_analysis_mi_scores.ipynb
+# masks all symbols after the first zero in each message (turns them into zeros)
+# only considers non-zero symbols
+def symbol_frequency_MI_new(interaction, n_attributes, n_values, vocab_size, is_gumbel=True):
+    messages = interaction.message.argmax(dim=-1) if is_gumbel else interaction.message
+    messages = messages[:, :-1]  # without EOS
+    # Mask out everything after the first zero in each row
+    mask = (messages != 0).type(torch.int)
+    mask = mask.cumprod(dim=1)  # stays 1 until first 0, then 0
+    messages = messages * mask
+    sender_input = interaction.sender_input
+    n_objects = sender_input.shape[1]
+    n_targets = int(n_objects / 2)
+    target_objects = sender_input[:, :n_targets]
+    target_objects = k_hot_to_attributes(target_objects, n_values)
+    (objects, fixed) = retrieve_concepts_sampling(target_objects)
+
+    # attributes which are not fixed are irrelevant to the concept and do not need to be communicated
+    objects[fixed == 0] = np.nan
+
+    favorite_symbol_MI = {}
+    mutual_information = {}
+    # find symbol with highest MI for each value at each attribute position (i.e., position sensitive)
+    for att in range(n_attributes):
+        for val in range(n_values):
+            object_labels = (objects[:, att] == val).astype(int)
+            max_MI = 0
+            # only looks at symbols > 0
+            for symbol in range(1, vocab_size):
                 symbol_indices = np.argwhere(messages == symbol)[0]
                 symbol_labels = np.zeros(len(messages))
                 symbol_labels[symbol_indices] = 1
