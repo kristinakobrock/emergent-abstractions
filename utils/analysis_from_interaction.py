@@ -989,3 +989,28 @@ def informativeness_score(interaction, distance='manhattan'):
     # informativeness of a lexicon is word informativeness per word averaged
     lex_info = np.sum(informativeness) / len(informativeness)
     return lex_info, len(unique_messages), len(counts_sender_input)
+
+def look_up_values(index_vector, value_vector, dictionary):
+    """
+    Look up values in a dictionary for index-attribute pairs from two vectors.
+
+    Args:
+        index_vector (list): A list of indices.
+        value_vector (list): A list of values corresponding to the indices.
+        dictionary (dict): A dictionary with index-attribute pairs as keys.
+
+    Returns:
+        list: A list of looked-up values.
+    """
+    # Initialize an empty list to store the looked-up values
+    looked_up_values = []
+
+    # Iterate over the index and value pairs
+    for index, value in zip(index_vector, value_vector):
+        # Construct the key by concatenating the index and value as strings
+        key = f"{index}{value}"
+
+        # Look up the value in the dictionary and append it to the list
+        looked_up_values.append(dictionary.get(key))
+
+    return looked_up_values
